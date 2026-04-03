@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AirWatch — Project Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@400;600;700;800&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #080c10;
+    --surface:  #0d1117;
+    --border:   #21262d;
+    --border2:  #30363d;
+    --text:     #e6edf3;
+    --muted:    #7d8590;
+    --blue:     #58a6ff;
+    --green:    #3fb950;
+    --orange:   #d29922;
+    --red:      #f85149;
+    --purple:   #bc8cff;
+    --teal:     #39d353;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    position: relative;
+    padding: 5rem 2rem 3rem;
+    text-align: center;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(88,166,255,.12) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .badge {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .72rem;
+    color: var(--blue);
+    border: 1px solid rgba(88,166,255,.35);
+    padding: .25rem .75rem;
+    border-radius: 20px;
+    margin-bottom: 1.5rem;
+    letter-spacing: .08em;
+    animation: fadeDown .6s ease both;
+  }
+  .hero h1 {
+    font-size: clamp(2.4rem, 6vw, 4.5rem);
+    font-weight: 800;
+    letter-spacing: -.02em;
+    line-height: 1.05;
+    animation: fadeDown .7s .1s ease both;
+  }
+  .hero h1 span { color: var(--blue); }
+  .hero p {
+    margin-top: 1.25rem;
+    font-size: 1.1rem;
+    color: var(--muted);
+    max-width: 560px;
+    margin-left: auto; margin-right: auto;
+    animation: fadeDown .7s .2s ease both;
+  }
+
+  /* ── STAT ROW ── */
+  .stats {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    margin: 2.5rem 0 0;
+    flex-wrap: wrap;
+    animation: fadeUp .7s .3s ease both;
+  }
+  .stat { text-align: center; }
+  .stat-num {
+    font-size: 2rem; font-weight: 800;
+    color: var(--blue);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .stat-label { font-size: .75rem; color: var(--muted); margin-top: 2px; letter-spacing: .06em; text-transform: uppercase; }
+
+  /* ── SECTION ── */
+  .section {
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: 4rem 2rem;
+  }
+  .section-title {
+    font-size: 1.6rem; font-weight: 700;
+    border-left: 4px solid var(--blue);
+    padding-left: .8rem;
+    margin-bottom: 2rem;
+  }
+
+  /* ── ARCHITECTURE DIAGRAM ── */
+  .arch-container {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 16px;
+    padding: 2.5rem 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .arch-container::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(88,166,255,.08), transparent 70%);
+    pointer-events: none;
+  }
+
+  .arch-row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .arch-node {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    background: #161b22;
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    padding: .55rem 1rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .78rem;
+    transition: border-color .2s, transform .2s;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .arch-node:hover { border-color: var(--blue); transform: translateY(-2px); }
+  .arch-node .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-blue   { background: var(--blue); box-shadow: 0 0 6px var(--blue); }
+  .dot-green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-orange { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+  .dot-purple { background: var(--purple); box-shadow: 0 0 6px var(--purple); }
+  .dot-teal   { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
+  .dot-red    { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+  .arrow {
+    color: var(--border2);
+    font-size: 1.2rem;
+    flex-shrink: 0;
+    user-select: none;
+  }
+
+  .arch-label {
+    font-size: .65rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    margin-bottom: .5rem;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .arch-layer {
+    padding: 1rem 1.2rem;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border);
+  }
+  .layer-de  { border-left: 3px solid var(--blue); background: rgba(88,166,255,.04); }
+  .layer-ml  { border-left: 3px solid var(--purple); background: rgba(188,140,255,.04); }
+  .layer-app { border-left: 3px solid var(--green); background: rgba(63,185,80,.04); }
+  .layer-ops { border-left: 3px solid var(--orange); background: rgba(210,153,34,.04); }
+
+  /* ── FILE TREE ── */
+  .filetree {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 1.75rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .82rem;
+    line-height: 1.9;
+    overflow-x: auto;
+  }
+  .tree-dir  { color: var(--blue); font-weight: 600; }
+  .tree-file { color: var(--text); }
+  .tree-comment { color: var(--muted); }
+  .tree-indent { display: inline-block; padding-left: 1.4rem; }
+
+  /* ── MODULE CARDS ── */
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.25rem;
+  }
+  .module-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 1.4rem 1.5rem;
+    transition: border-color .2s, transform .2s;
+    cursor: default;
+  }
+  .module-card:hover { border-color: var(--blue); transform: translateY(-3px); }
+  .module-card h3 {
+    font-size: 1rem; font-weight: 700;
+    display: flex; align-items: center; gap: .5rem;
+    margin-bottom: .75rem;
+  }
+  .module-card ul {
+    list-style: none;
+    padding: 0;
+  }
+  .module-card li {
+    font-size: .82rem; color: var(--muted);
+    padding: .2rem 0;
+    display: flex; align-items: flex-start; gap: .5rem;
+  }
+  .module-card li::before { content: '→'; color: var(--blue); flex-shrink: 0; }
+
+  /* ── PIPELINE FLOW ── */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    padding: 1rem 0;
+    flex-wrap: nowrap;
+  }
+  .pipe-step {
+    flex-shrink: 0;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    padding: .8rem 1.1rem;
+    text-align: center;
+    min-width: 120px;
+    transition: border-color .2s;
+  }
+  .pipe-step:hover { border-color: var(--blue); }
+  .pipe-step .icon { font-size: 1.5rem; margin-bottom: .3rem; }
+  .pipe-step .name { font-size: .78rem; font-weight: 600; }
+  .pipe-step .sub  { font-size: .68rem; color: var(--muted); margin-top: 2px; font-family: 'IBM Plex Mono', monospace; }
+  .pipe-arrow {
+    flex-shrink: 0;
+    width: 32px; text-align: center;
+    color: var(--border2); font-size: 1rem;
+  }
+
+  /* ── COMMANDS ── */
+  .cmd-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1rem;
+  }
+  .cmd-card {
+    background: #0d1117;
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .cmd-header {
+    background: #161b22;
+    border-bottom: 1px solid var(--border);
+    padding: .55rem 1rem;
+    font-size: .72rem;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .cmd-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .cmd-body {
+    padding: .9rem 1rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .82rem;
+    line-height: 1.7;
+  }
+  .cmd-comment { color: var(--muted); }
+  .cmd-prompt  { color: var(--green); }
+  .cmd-text    { color: var(--text); }
+  .cmd-out     { color: var(--blue); }
+
+  /* ── SKILLS TABLE ── */
+  .skills-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+  .skill-pill {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    padding: .9rem 1.1rem;
+    display: flex; align-items: center; gap: .75rem;
+  }
+  .skill-icon { font-size: 1.3rem; flex-shrink: 0; }
+  .skill-name { font-weight: 600; font-size: .9rem; }
+  .skill-tech { font-size: .75rem; color: var(--muted); margin-top: 2px; font-family: 'IBM Plex Mono', monospace; }
+
+  /* ── DEPLOY CARDS ── */
+  .deploy-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.25rem;
+  }
+  .deploy-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 1.4rem;
+  }
+  .deploy-card h3 { font-size: 1rem; margin-bottom: .6rem; display: flex; align-items: center; gap: .5rem; }
+  .deploy-card ol { padding-left: 1.2rem; color: var(--muted); font-size: .85rem; line-height: 1.8; }
+  .deploy-card .tag {
+    display: inline-block;
+    font-size: .68rem; font-family: 'IBM Plex Mono', monospace;
+    padding: .15rem .5rem; border-radius: 4px;
+    margin-left: .4rem; vertical-align: middle;
+  }
+  .tag-free { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .tag-paid { background: rgba(210,153,34,.15); color: var(--orange); border: 1px solid rgba(210,153,34,.3); }
+
+  /* ── FOOTER ── */
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: .85rem;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeDown { from { opacity:0; transform:translateY(-16px); } to { opacity:1; transform:none; } }
+  @keyframes fadeUp   { from { opacity:0; transform:translateY(16px); }  to { opacity:1; transform:none; } }
+
+  /* scroll reveal */
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: none; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ HERO ═══════════════════════════ -->
+<div class="hero">
+  <div class="badge">🌬️ END-TO-END DATA SCIENCE PROJECT</div>
+  <h1>Air<span>Watch</span></h1>
+  <p>Real-Time Air Quality Monitoring & Prediction — a production-ready system that impresses recruiters.</p>
+  <div class="stats">
+    <div class="stat"><div class="stat-num">12</div><div class="stat-label">Cities Monitored</div></div>
+    <div class="stat"><div class="stat-num">6</div><div class="stat-label">ML Models Compared</div></div>
+    <div class="stat"><div class="stat-num">28</div><div class="stat-label">Engineered Features</div></div>
+    <div class="stat"><div class="stat-num">6</div><div class="stat-label">Dashboard Pages</div></div>
+    <div class="stat"><div class="stat-num">17K+</div><div class="stat-label">Data Points (30 days)</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ PIPELINE ═══════════════════════════ -->
+<div class="section reveal">
+  <div class="section-title">🔄 End-to-End Data Pipeline</div>
+  <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:2rem;overflow-x:auto;">
+    <div class="pipeline">
+      <div class="pipe-step"><div class="icon">🌐</div><div class="name">OpenWeather API</div><div class="sub">Air + Weather</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><div class="icon">⏰</div><div class="name">APScheduler</div><div class="sub">Every 30 min</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><div class="icon">🗄️</div><div class="name">SQLite</div><div class="sub">17K+ records</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><div class="icon">🔧</div><div class="name">Processor</div><div class="sub">Clean + Features</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><div class="icon">🤖</div><div class="name">ML Trainer</div><div class="sub">6 models + tuning</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><div class="icon">💾</div><div class="name">best_model.pkl</div><div class="sub">Serialized</div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><div class="icon">📊</div><div class="name">Streamlit App</div><div class="sub">6 pages</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ ARCHITECTURE ═══════════════════════════ -->
+<div class="section reveal">
+  <div class="section-title">🏗️ System Architecture</div>
+  <div class="arch-container">
+
+    <div class="arch-layer layer-de">
+      <div class="arch-label">📡 Data Engineering Layer</div>
+      <div class="arch-row">
+        <div class="arch-node"><span class="dot dot-blue"></span>OpenWeatherMap API</div>
+        <div class="arrow">→</div>
+        <div class="arch-node"><span class="dot dot-blue"></span>collector.py</div>
+        <div class="arrow">→</div>
+        <div class="arch-node"><span class="dot dot-blue"></span>Retry + Rate Limiter</div>
+        <div class="arrow">→</div>
+        <div class="arch-node"><span class="dot dot-blue"></span>SQLite DB</div>
+        <div class="arrow">→</div>
+        <div class="arch-node"><span class="dot dot-blue"></span>CSV Export</div>
+      </div>
+    </div>
+
+    <div class="arch-layer layer-ml">
+      <div class="arch-label">🤖 Machine Learning Layer</div>
+      <div class="arch-row">
+        <div class="arch-node"><span class="dot dot-purple"></span>processor.py (28 features)</div>
+        <div class="arrow">→</div>
+        <div class="arch-node"><span class="dot dot-purple"></span>trainer.py (6 models)</div>
+        <div class="arrow">→</div>
+        <div class="arch-node"><span class="dot dot-purple"></span>RandomizedSearchCV</div>
+        <div class="arrow">→</div>
+        <div class="arch-node"><span class="dot dot-purple"></span>best_model.pkl</div>
+        <div class="arrow">→</div>
+        <div class="arch-node"><span class="dot dot-purple"></span>predictor.py</div>
+      </div>
+    </div>
+
+    <div class="arch-layer layer-app">
+      <div class="arch-label">🌐 Application Layer</div>
+      <div class="arch-row">
+        <div class="arch-node"><span class="dot dot-green"></span>📊 Dashboard</div>
+        <div class="arch-node"><span class="dot dot-green"></span>🌍 City Comparison</div>
+        <div class="arch-node"><span class="dot dot-green"></span>🔮 AQI Prediction</div>
+        <div class="arch-node"><span class="dot dot-green"></span>⚠️ Health Alerts</div>
+        <div class="arch-node"><span class="dot dot-green"></span>🗺️ Map View</div>
+        <div class="arch-node"><span class="dot dot-green"></span>🔬 Anomaly Detection</div>
+      </div>
+    </div>
+
+    <div class="arch-layer layer-ops">
+      <div class="arch-label">⚙️ Operations Layer</div>
+      <div class="arch-row">
+        <div class="arch-node"><span class="dot dot-orange"></span>run.py CLI</div>
+        <div class="arch-node"><span class="dot dot-orange"></span>config/config.yaml</div>
+        <div class="arch-node"><span class="dot dot-orange"></span>Rotating Log Files</div>
+        <div class="arch-node"><span class="dot dot-orange"></span>Demo Data Generator</div>
+        <div class="arch-node"><span class="dot dot-orange"></span>requirements.txt</div>
+        <div class="arch-node"><span class="dot dot-orange"></span>Docker / Cloud Deploy</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════ FILE TREE ═══════════════════════════ -->
+<div class="section reveal">
+  <div class="section-title">📁 Project Structure</div>
+  <div class="filetree">
+    <span class="tree-dir">air_quality_project/</span><br>
+    <span class="tree-indent"><span class="tree-dir">config/</span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">config.yaml</span> <span class="tree-comment">    ← cities, API key, scheduler, ML settings</span></span><br></span>
+    <br>
+    <span class="tree-indent"><span class="tree-dir">src/</span> <span class="tree-comment">                ← all Python modules</span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">utils.py</span> <span class="tree-comment">       ← config loader, logging, AQI helpers</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">collector.py</span> <span class="tree-comment">   ← API fetch + APScheduler + SQLite write</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">processor.py</span> <span class="tree-comment">   ← clean, lag/rolling/ratio features</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">trainer.py</span> <span class="tree-comment">     ← 6-model comparison + hyperparameter tuning</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">predictor.py</span> <span class="tree-comment">   ← inference wrapper for saved model</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">anomaly.py</span> <span class="tree-comment">     ← Isolation Forest + spike alerts</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">demo_data.py</span> <span class="tree-comment">   ← 30-day synthetic dataset generator</span></span><br></span>
+    <br>
+    <span class="tree-indent"><span class="tree-dir">app/</span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">main.py</span> <span class="tree-comment">        ← Streamlit dashboard (6 interactive pages)</span></span><br></span>
+    <br>
+    <span class="tree-indent"><span class="tree-dir">data/</span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-dir">raw/</span> <span class="tree-comment">           ← CSV exports from collector</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-dir">processed/</span> <span class="tree-comment">     ← feature-engineered data</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">air_quality.db</span> <span class="tree-comment">← SQLite database</span></span><br></span>
+    <br>
+    <span class="tree-indent"><span class="tree-dir">models/</span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">best_model.pkl</span> <span class="tree-comment">← serialized best model</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">scaler.pkl</span> <span class="tree-comment">     ← StandardScaler</span></span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">metadata.json</span> <span class="tree-comment">  ← metrics, feature importance, all model scores</span></span><br></span>
+    <br>
+    <span class="tree-indent"><span class="tree-dir">logs/</span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">app.log</span> <span class="tree-comment">        ← rotating log (10 MB × 5 backups)</span></span><br></span>
+    <br>
+    <span class="tree-indent"><span class="tree-dir">.streamlit/</span><br></span>
+    <span class="tree-indent"><span class="tree-indent"><span class="tree-file">config.toml</span> <span class="tree-comment">    ← dark theme + server settings</span></span><br></span>
+    <br>
+    <span class="tree-file">run.py</span> <span class="tree-comment">              ← unified CLI (--demo / --collect / --train / --app)</span><br>
+    <span class="tree-file">requirements.txt</span><br>
+    <span class="tree-file">README.md</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ MODULES ═══════════════════════════ -->
+<div class="section reveal">
+  <div class="section-title">🧩 Module Breakdown</div>
+  <div class="module-grid">
+
+    <div class="module-card">
+      <h3>📡 <span style="color:var(--blue)">collector.py</span></h3>
+      <ul>
+        <li>12 global cities from config YAML</li>
+        <li>OpenWeather Air Pollution + Weather APIs</li>
+        <li>3× retry with delay on HTTP failure</li>
+        <li>Rate limiter between city calls</li>
+        <li>SQLite UNIQUE constraint — no duplicates</li>
+        <li>APScheduler daemon thread (every 30 min)</li>
+        <li>Auto CSV export after each run</li>
+      </ul>
+    </div>
+
+    <div class="module-card">
+      <h3>🔧 <span style="color:var(--purple)">processor.py</span></h3>
+      <ul>
+        <li>Deduplication on (timestamp, city)</li>
+        <li>City-median then global-median imputation</li>
+        <li>±3σ winsorisation for key pollutants</li>
+        <li>Calendar features: hour, day, rush_hour</li>
+        <li>Ratio features: PM ratio, NO/NO₂</li>
+        <li>Lag features: pm2_5 & aqi (lags 1–3)</li>
+        <li>Rolling mean & std (window = 3)</li>
+      </ul>
+    </div>
+
+    <div class="module-card">
+      <h3>🤖 <span style="color:var(--orange)">trainer.py</span></h3>
+      <ul>
+        <li>6 models: LR, Ridge, Lasso, RF, GB, ET</li>
+        <li>StandardScaler on all features</li>
+        <li>80/20 train-test split</li>
+        <li>3-fold cross-validation per model</li>
+        <li>Auto-selects best by RMSE</li>
+        <li>RandomizedSearchCV for top 3 models</li>
+        <li>Saves pkl + scaler + metadata JSON</li>
+      </ul>
+    </div>
+
+    <div class="module-card">
+      <h3>🔬 <span style="color:var(--red)">anomaly.py</span></h3>
+      <ul>
+        <li>Isolation Forest (5% contamination)</li>
+        <li>Trained on PM2.5, PM10, NO₂, O₃, AQI</li>
+        <li>Flags 5% most anomalous readings</li>
+        <li>Anomaly score per record</li>
+        <li>Spike alerts: delta ≥ 50 AQI in one step</li>
+        <li>3 severity levels: MEDIUM/HIGH/CRITICAL</li>
+      </ul>
+    </div>
+
+    <div class="module-card">
+      <h3>📊 <span style="color:var(--green)">app/main.py</span></h3>
+      <ul>
+        <li>Dark theme with custom CSS + Google Fonts</li>
+        <li>Auto-refresh every 10 minutes</li>
+        <li>Cached data loading (TTL = 10 min)</li>
+        <li>6 full-featured pages</li>
+        <li>Plotly: line, bar, scatter, heatmap, radar, gauge, map</li>
+        <li>Interactive sidebar filters</li>
+      </ul>
+    </div>
+
+    <div class="module-card">
+      <h3>🛠️ <span style="color:var(--teal)">run.py (CLI)</span></h3>
+      <ul>
+        <li><code>--demo</code>   generate data + train</li>
+        <li><code>--collect</code> live API collection loop</li>
+        <li><code>--train</code>  re-train on latest data</li>
+        <li><code>--app</code>   launch Streamlit</li>
+        <li><code>--all</code>   collect + train + app</li>
+        <li>Graceful SIGINT/SIGTERM shutdown</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════ COMMANDS ═══════════════════════════ -->
+<div class="section reveal">
+  <div class="section-title">⚡ Quick Start Commands</div>
+  <div class="cmd-grid">
+
+    <div class="cmd-card">
+      <div class="cmd-header"><div class="cmd-dot" style="background:#f85149"></div><div class="cmd-dot" style="background:#d29922"></div><div class="cmd-dot" style="background:#3fb950"></div> bash — Setup</div>
+      <div class="cmd-body">
+        <span class="cmd-comment"># 1. Create virtual environment</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">python -m venv venv</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">source venv/bin/activate</span><br>
+        <br>
+        <span class="cmd-comment"># 2. Install dependencies</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">pip install -r requirements.txt</span><br>
+        <br>
+        <span class="cmd-comment"># 3. Demo mode (no API key needed)</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">python run.py --demo</span><br>
+        <span class="cmd-out">✓ Generated 17,292 synthetic records</span><br>
+        <span class="cmd-out">★ Best model: LinearRegression  R²=1.00</span>
+      </div>
+    </div>
+
+    <div class="cmd-card">
+      <div class="cmd-header"><div class="cmd-dot" style="background:#f85149"></div><div class="cmd-dot" style="background:#d29922"></div><div class="cmd-dot" style="background:#3fb950"></div> bash — Launch Dashboard</div>
+      <div class="cmd-body">
+        <span class="cmd-comment"># Launch Streamlit app</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">python run.py --app</span><br>
+        <span class="cmd-out">🌐 Launching Streamlit dashboard…</span><br>
+        <span class="cmd-out">Local URL: http://localhost:8501</span><br>
+        <br>
+        <span class="cmd-comment"># Or with live API data (add key to config.yaml)</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">python run.py --all</span><br>
+        <span class="cmd-out">📡 Collector running every 30 min</span><br>
+        <span class="cmd-out">🤖 Model training complete</span><br>
+        <span class="cmd-out">🌐 Dashboard live</span>
+      </div>
+    </div>
+
+    <div class="cmd-card">
+      <div class="cmd-header"><div class="cmd-dot" style="background:#f85149"></div><div class="cmd-dot" style="background:#d29922"></div><div class="cmd-dot" style="background:#3fb950"></div> bash — Docker Deploy</div>
+      <div class="cmd-body">
+        <span class="cmd-comment"># Build image</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">docker build -t airwatch .</span><br>
+        <br>
+        <span class="cmd-comment"># Run container</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">docker run -p 8501:8501 airwatch</span><br>
+        <br>
+        <span class="cmd-comment"># With your API key</span><br>
+        <span class="cmd-prompt">$ </span><span class="cmd-text">docker run -p 8501:8501 \</span><br>
+        <span class="cmd-text">  -e OWM_KEY=your_key airwatch</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════ SKILLS ═══════════════════════════ -->
+<div class="section reveal">
+  <div class="section-title">💼 Recruiter-Facing Skills Demonstrated</div>
+  <div class="skills-grid">
+    <div class="skill-pill"><div class="skill-icon">🔁</div><div><div class="skill-name">Data Engineering</div><div class="skill-tech">REST API · SQLite · APScheduler · Retry Logic</div></div></div>
+    <div class="skill-pill"><div class="skill-icon">🔬</div><div><div class="skill-name">Feature Engineering</div><div class="skill-tech">Lag · Rolling Stats · Calendar · Ratios</div></div></div>
+    <div class="skill-pill"><div class="skill-icon">🤖</div><div><div class="skill-name">Machine Learning</div><div class="skill-tech">sklearn · 6 Models · RandomizedSearchCV</div></div></div>
+    <div class="skill-pill"><div class="skill-icon">📊</div><div><div class="skill-name">Data Visualisation</div><div class="skill-tech">Plotly · Streamlit · 8 Chart Types</div></div></div>
+    <div class="skill-pill"><div class="skill-icon">🚨</div><div><div class="skill-name">Anomaly Detection</div><div class="skill-tech">Isolation Forest · Spike Alerting</div></div></div>
+    <div class="skill-pill"><div class="skill-icon">🏗️</div><div><div class="skill-name">Software Engineering</div><div class="skill-tech">Modular · Logging · Config-Driven · CLI</div></div></div>
+    <div class="skill-pill"><div class="skill-icon">🚀</div><div><div class="skill-name">Deployment</div><div class="skill-tech">Streamlit Cloud · Render · Docker · HF Spaces</div></div></div>
+    <div class="skill-pill"><div class="skill-icon">🔒</div><div><div class="skill-name">Production Patterns</div><div class="skill-tech">Error Handling · Retry · Rate Limiting · Logging</div></div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ DEPLOYMENT ═══════════════════════════ -->
+<div class="section reveal">
+  <div class="section-title">🚀 Deployment Options</div>
+  <div class="deploy-grid">
+
+    <div class="deploy-card">
+      <h3>☁️ Streamlit Cloud <span class="tag tag-free">FREE</span></h3>
+      <ol>
+        <li>Push project to GitHub</li>
+        <li>Visit <strong>share.streamlit.io</strong></li>
+        <li>Set entrypoint: <code>app/main.py</code></li>
+        <li>Add API key in Secrets (optional)</li>
+        <li>Click Deploy — done in 2 min</li>
+      </ol>
+    </div>
+
+    <div class="deploy-card">
+      <h3>🐋 Docker <span class="tag tag-free">SELF-HOST</span></h3>
+      <ol>
+        <li>Add <code>Dockerfile</code> to project root</li>
+        <li><code>docker build -t airwatch .</code></li>
+        <li><code>docker run -p 8501:8501 airwatch</code></li>
+        <li>Deploy to any VPS or ECS/GCR</li>
+        <li>Add env var for API key</li>
+      </ol>
+    </div>
+
+    <div class="deploy-card">
+      <h3>🤗 HuggingFace Spaces <span class="tag tag-free">FREE</span></h3>
+      <ol>
+        <li>Create Space with <strong>Streamlit SDK</strong></li>
+        <li>Upload all project files</li>
+        <li>Set <code>app_file = app/main.py</code></li>
+        <li>Add HF secrets for API key</li>
+        <li>Persistent storage via HF Datasets</li>
+      </ol>
+    </div>
+
+    <div class="deploy-card">
+      <h3>☁️ Render <span class="tag tag-free">FREE TIER</span></h3>
+      <ol>
+        <li>Connect GitHub repo to Render</li>
+        <li>Build: <code>pip install -r requirements.txt</code></li>
+        <li>Start: <code>streamlit run app/main.py</code></li>
+        <li>Set environment variables</li>
+        <li>Auto-deploy on git push</li>
+      </ol>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════ FOOTER ═══════════════════════════ -->
+<div class="footer">
+  AirWatch · Built with Python 3.9+ · pandas · scikit-learn · Streamlit · Plotly · SQLite<br>
+  <span style="color:var(--border2);">─────────────────────────────────────────────────────</span><br>
+  <span style="color:var(--blue);">python run.py --demo && python run.py --app</span>
+</div>
+
+<script>
+  const observer = new IntersectionObserver(
+    entries => entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); }),
+    { threshold: 0.12 }
+  );
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+{
+  "best_model": "LinearRegression",
+  "metrics": {
+    "rmse": 0.0,
+    "mae": 0.0,
+    "r2": 1.0,
+    "cv_rmse": 0.0
+  },
+  "feature_columns": [
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "is_rush_hour",
+    "co",
+    "no",
+    "no2",
+    "o3",
+    "so2",
+    "pm2_5",
+    "pm10",
+    "nh3",
+    "temperature",
+    "humidity",
+    "wind_speed",
+    "pm_ratio",
+    "no_no2_ratio",
+    "pm2_5_lag_1",
+    "pm2_5_lag_2",
+    "pm2_5_lag_3",
+    "aqi_lag_1",
+    "aqi_lag_2",
+    "aqi_lag_3",
+    "pm2_5_rolling_mean_3",
+    "pm2_5_rolling_std_3",
+    "aqi_rolling_mean_3",
+    "city_encoded"
+  ],
+  "feature_importances": null,
+  "trained_at": "2026-04-02T18:20:35.608296",
+  "all_results": {
+    "LinearRegression": {
+      "rmse": 0.0,
+      "mae": 0.0,
+      "r2": 1.0,
+      "cv_rmse": 0.0
+    },
+    "Ridge": {
+      "rmse": 0.2923,
+      "mae": 0.208,
+      "r2": 1.0,
+      "cv_rmse": 0.4192
+    },
+    "Lasso": {
+      "rmse": 3.3019,
+      "mae": 2.3169,
+      "r2": 0.996,
+      "cv_rmse": 3.2166
+    },
+    "RandomForest": {
+      "rmse": 5.4975,
+      "mae": 3.9137,
+      "r2": 0.9888,
+      "cv_rmse": 5.7065
+    },
+    "GradientBoosting": {
+      "rmse": 5.8741,
+      "mae": 4.4352,
+      "r2": 0.9872,
+      "cv_rmse": 5.9274
+    },
+    "ExtraTrees": {
+      "rmse": 5.563,
+      "mae": 4.0109,
+      "r2": 0.9885,
+      "cv_rmse": 5.7686
+    }
+  }
+}
