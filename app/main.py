@@ -278,7 +278,10 @@ def load_data() -> pd.DataFrame:
             st.error("⛔ No data found. Run `python run.py --demo` to generate demo data.")
             st.stop()
 
-    df["timestamp"]    = pd.to_datetime(df["timestamp"])
+    # Parse timestamps and strip timezone info.
+    # Supabase returns TIMESTAMPTZ (tz-aware); datetime.now() is tz-naive.
+    # Comparing them without this fix raises TypeError on line: df >= cutoff
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_localize(None)
     df["hour"]         = df["timestamp"].dt.hour
     df["day_of_week"]  = df["timestamp"].dt.dayofweek
     df["month"]        = df["timestamp"].dt.month
