@@ -18,29 +18,81 @@ import yaml
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Default config used when config.yaml is missing (e.g. Streamlit Cloud)
+_DEFAULT_CONFIG: dict = {
+    "api": {
+        "openweather_api_key": "YOUR_OPENWEATHER_API_KEY",
+        "base_url": "http://api.openweathermap.org/data/2.5",
+        "geocoding_url": "http://api.openweathermap.org/geo/1.0/direct",
+        "timeout_seconds": 10,
+    },
+    "cities": [
+        {"name": "Mumbai",      "country": "IN"},
+        {"name": "Delhi",       "country": "IN"},
+        {"name": "Bangalore",   "country": "IN"},
+        {"name": "Chennai",     "country": "IN"},
+        {"name": "Kolkata",     "country": "IN"},
+        {"name": "London",      "country": "GB"},
+        {"name": "New York",    "country": "US"},
+        {"name": "Beijing",     "country": "CN"},
+        {"name": "Tokyo",       "country": "JP"},
+        {"name": "Paris",       "country": "FR"},
+        {"name": "Los Angeles", "country": "US"},
+        {"name": "Sydney",      "country": "AU"},
+    ],
+    "scheduler":  {"interval_minutes": 30, "max_retries": 3,
+                   "retry_delay_seconds": 60, "rate_limit_delay_seconds": 1.2},
+    "data":       {"raw_path": "data/raw", "processed_path": "data/processed",
+                   "db_path": "data/air_quality.db", "export_csv": True},
+    "models":     {"save_path": "models", "target_column": "aqi",
+                   "test_size": 0.2, "cv_folds": 3, "n_iter_search": 10,
+                   "random_state": 42},
+    "anomaly":    {"contamination": 0.05, "spike_threshold": 150, "spike_delta": 50},
+    "logging":    {"level": "INFO", "log_file": "logs/app.log",
+                   "max_bytes": 10485760, "backup_count": 5},
+}
+
+
 def load_config(config_path: str = "config/config.yaml") -> dict:
     """
-    Load YAML config, then override with Streamlit secrets if on cloud.
-    Priority: 1) Streamlit secrets  2) Env var OWM_API_KEY  3) config.yaml
-    """
-    path = Path(config_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-    with path.open("r") as fh:
-        config = yaml.safe_load(fh)
+    Load configuration.  Never raises — always returns a usable dict.
 
-    # Override with Streamlit secrets (Streamlit Cloud)
+    Priority (highest wins):
+      1. Streamlit secrets   st.secrets["api"]["openweather_api_key"]
+      2. Environment var     OWM_API_KEY
+      3. config/config.yaml  (present locally, may be absent on Streamlit Cloud)
+      4. Built-in defaults   _DEFAULT_CONFIG
+    """
+    import copy
+    config = copy.deepcopy(_DEFAULT_CONFIG)
+
+    # Try loading from YAML file (works locally; may be missing on cloud)
+    path = Path(config_path)
+    if path.exists():
+        try:
+            with path.open("r") as fh:
+                file_cfg = yaml.safe_load(fh) or {}
+            # Deep-merge file config over defaults
+            for section, values in file_cfg.items():
+                if isinstance(values, dict) and section in config:
+                    config[section].update(values)
+                else:
+                    config[section] = values
+        except Exception:
+            pass   # Malformed YAML — keep defaults
+
+    # Override API key from Streamlit secrets (highest priority on cloud)
     try:
         import streamlit as st
         if hasattr(st, "secrets"):
             if "api" in st.secrets:
                 key = st.secrets["api"].get("openweather_api_key", "")
-                if key:
+                if key and key != "YOUR_OPENWEATHER_API_KEY":
                     config["api"]["openweather_api_key"] = key
     except Exception:
         pass
 
-    # Override with environment variable (Render / Docker)
+    # Override from environment variable
     env_key = os.environ.get("OWM_API_KEY", "")
     if env_key:
         config["api"]["openweather_api_key"] = env_key

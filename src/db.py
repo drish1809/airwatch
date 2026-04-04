@@ -113,18 +113,64 @@ def is_postgres() -> bool:
 # Connection factory
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _pg_connect():
+def _validate_pg_url(url: str) -> str:
     """
-    Open a psycopg2 connection to Supabase.
-    Supabase requires SSL — we enforce it here.
+    Validate and fix common mistakes in the Supabase URL.
+    Returns the (possibly corrected) URL or raises a clear ValueError.
     """
-    import psycopg2
-    url = _get_pg_url()
+    if not url:
+        raise ValueError("DATABASE_URL is empty.")
 
-    # Add sslmode=require if not already present (Supabase needs it)
+    # Must start with postgresql:// or postgres://
+    if not (url.startswith("postgresql://") or url.startswith("postgres://")):
+        raise ValueError(
+            f"URL must start with postgresql:// — got: {url[:40]}"
+        )
+
+    # Parse the URL to catch structural mistakes
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+
+    # Detect missing colon between username and password.
+    # Correct:  postgresql://postgres:PASSWORD@db.xxx...
+    # Wrong:    postgresql://postgres PASSWORD@db.xxx... (no colon → password=None)
+    if parsed.password is None:
+        raise ValueError(
+            "DATABASE_URL is missing the colon between username and password.\n\n"
+            "✅ Correct format:\n"
+            "   postgresql://postgres:PASSWORD@db.XXXX.supabase.co:5432/postgres\n\n"
+            "❌ Your URL looks like:\n"
+            "   postgresql://postgresPASSWORD@db.XXXX.supabase.co:5432/postgres\n\n"
+            "Fix: add a colon ( : ) after 'postgres' and before your password."
+        )
+
+    host = parsed.hostname or ""
+
+    if not host or "supabase" not in host:
+        raise ValueError(
+            f"Unexpected hostname in DATABASE_URL: '{host}'\n"
+            "Expected something like: db.abcdefgh.supabase.co"
+        )
+
+    # Ensure sslmode=require (Supabase mandates SSL)
     if "sslmode" not in url:
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}sslmode=require"
+
+    return url
+
+
+def _pg_connect():
+    """
+    Open a psycopg2 connection to Supabase with validation and clear errors.
+    """
+    import psycopg2
+    raw_url = _get_pg_url()
+
+    try:
+        url = _validate_pg_url(raw_url)
+    except ValueError as ve:
+        raise ConnectionError(str(ve)) from ve
 
     try:
         return psycopg2.connect(url)
