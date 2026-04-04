@@ -76,109 +76,83 @@ ON CONFLICT (timestamp,city) DO NOTHING
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# URL resolution
+# Connection parameter resolution
+# Supports BOTH individual params AND a URL — individual params are preferred
+# because they have zero URL-parsing issues.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_pg_url() -> Optional[str]:
+def _get_pg_params() -> Optional[dict]:
     """
-    Returns the PostgreSQL connection URL from (in priority order):
-      1. Streamlit secrets  →  st.secrets["database"]["url"]
-      2. Environment var    →  DATABASE_URL
-      3. None               →  use SQLite locally
+    Returns psycopg2 connection keyword arguments, or None for SQLite.
+
+    Checks (in order):
+      1. Streamlit secrets — individual fields [database] host/password/etc.
+      2. Streamlit secrets — single URL        [database] url
+      3. Environment var  — DATABASE_URL
+      4. None             — fall back to SQLite
     """
-    # Streamlit secrets (works on Streamlit Cloud)
     try:
         import streamlit as st
         if hasattr(st, "secrets") and "database" in st.secrets:
-            url = st.secrets["database"].get("url", "")
+            sec = st.secrets["database"]
+
+            # ── Option A: individual fields (recommended, zero parsing issues) ──
+            host = sec.get("host", "")
+            if host and "supabase" in host:
+                return {
+                    "host":     host,
+                    "port":     int(sec.get("port", 5432)),
+                    "dbname":   sec.get("dbname", "postgres"),
+                    "user":     sec.get("user", "postgres"),
+                    "password": str(sec.get("password", "")),
+                    "sslmode":  "require",
+                }
+
+            # ── Option B: single URL string ────────────────────────────────────
+            url = sec.get("url", "")
             if url and url.startswith("postgres"):
-                return url
+                return {"dsn": url + ("&sslmode=require" if "?" in url
+                                      else "?sslmode=require")}
     except Exception:
         pass
 
-    # Environment variable (Render, Railway, Docker)
+    # Environment variable fallback
     env = os.environ.get("DATABASE_URL", "")
     if env and env.startswith("postgres"):
-        return env
+        return {"dsn": env + ("&sslmode=require" if "?" in env else "?sslmode=require")}
 
-    return None
+    return None   # → use SQLite
 
 
 def is_postgres() -> bool:
-    """True when a PostgreSQL URL is available."""
-    return _get_pg_url() is not None
+    """True when Supabase / Postgres credentials are available."""
+    return _get_pg_params() is not None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Connection factory
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _validate_pg_url(url: str) -> str:
-    """
-    Validate and fix common mistakes in the Supabase URL.
-    Returns the (possibly corrected) URL or raises a clear ValueError.
-    """
-    if not url:
-        raise ValueError("DATABASE_URL is empty.")
-
-    # Must start with postgresql:// or postgres://
-    if not (url.startswith("postgresql://") or url.startswith("postgres://")):
-        raise ValueError(
-            f"URL must start with postgresql:// — got: {url[:40]}"
-        )
-
-    # Parse the URL to catch structural mistakes
-    from urllib.parse import urlparse
-    parsed = urlparse(url)
-
-    # Detect missing colon between username and password.
-    # Correct:  postgresql://postgres:PASSWORD@db.xxx...
-    # Wrong:    postgresql://postgres PASSWORD@db.xxx... (no colon → password=None)
-    if parsed.password is None:
-        raise ValueError(
-            "DATABASE_URL is missing the colon between username and password.\n\n"
-            "✅ Correct format:\n"
-            "   postgresql://postgres:PASSWORD@db.XXXX.supabase.co:5432/postgres\n\n"
-            "❌ Your URL looks like:\n"
-            "   postgresql://postgresPASSWORD@db.XXXX.supabase.co:5432/postgres\n\n"
-            "Fix: add a colon ( : ) after 'postgres' and before your password."
-        )
-
-    host = parsed.hostname or ""
-
-    if not host or "supabase" not in host:
-        raise ValueError(
-            f"Unexpected hostname in DATABASE_URL: '{host}'\n"
-            "Expected something like: db.abcdefgh.supabase.co"
-        )
-
-    # Ensure sslmode=require (Supabase mandates SSL)
-    if "sslmode" not in url:
-        sep = "&" if "?" in url else "?"
-        url = f"{url}{sep}sslmode=require"
-
-    return url
-
-
 def _pg_connect():
     """
-    Open a psycopg2 connection to Supabase with validation and clear errors.
+    Open a psycopg2 connection using individual keyword arguments.
+    No URL parsing — completely avoids URL format issues.
     """
     import psycopg2
-    raw_url = _get_pg_url()
+    params = _get_pg_params()
+
+    if params is None:
+        raise ConnectionError(
+            "No Postgres credentials found.\n"
+            "Add [database] section to Streamlit secrets."
+        )
 
     try:
-        url = _validate_pg_url(raw_url)
-    except ValueError as ve:
-        raise ConnectionError(str(ve)) from ve
-
-    try:
-        return psycopg2.connect(url)
+        return psycopg2.connect(**params)
     except psycopg2.OperationalError as e:
         raise ConnectionError(
-            f"Could not connect to Supabase.\n"
-            f"Check your DATABASE_URL in Streamlit secrets.\n"
-            f"Original error: {e}"
+            f"Supabase connection failed: {e}\n"
+            "Check the 🔧 Connection Debug page for help."
         ) from e
 
 
