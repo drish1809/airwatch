@@ -51,16 +51,49 @@ st.set_page_config(
 # Background scheduler — starts once per server process, survives all sessions
 # ─────────────────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
-def _init_scheduler():
+def _init_app() -> dict:
+    """
+    Runs ONCE per server process (Streamlit cache_resource guarantee).
+    Returns a status dict so the UI can show exactly what is connected.
+    """
+    status = {
+        "db_ok":        False,
+        "db_type":      "none",
+        "api_key_ok":   False,
+        "scheduler_ok": False,
+        "error":        "",
+    }
+
+    # ── 1. Load config (reads secrets on cloud) ───────────────────────────
     try:
         cfg = load_config(str(ROOT / "config" / "config.yaml"))
-        from src.scheduler import start_background_scheduler
-        start_background_scheduler(cfg)
-    except Exception:
-        pass
-    return True
+        api_key = cfg["api"].get("openweather_api_key", "")
+        status["api_key_ok"] = bool(api_key and api_key != "YOUR_OPENWEATHER_API_KEY")
+    except Exception as e:
+        status["error"] += f"Config error: {e}. "
+        cfg = {}
 
-_init_scheduler()
+    # ── 2. Initialise database (creates table if missing) ─────────────────
+    try:
+        from src.db import init_db, is_postgres
+        init_db()
+        status["db_ok"]   = True
+        status["db_type"] = "postgres" if is_postgres() else "sqlite"
+    except Exception as e:
+        status["error"] += f"DB error: {e}. "
+
+    # ── 3. Start background scheduler ────────────────────────────────────
+    if status["api_key_ok"] and cfg:
+        try:
+            from src.scheduler import start_background_scheduler
+            start_background_scheduler(cfg)
+            status["scheduler_ok"] = True
+        except Exception as e:
+            status["error"] += f"Scheduler error: {e}. "
+
+    return status
+
+_APP_STATUS = _init_app()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global styles
@@ -344,13 +377,10 @@ with st.spinner("Loading data…"):
 
 all_cities_in_data = sorted(df_all["city"].unique().tolist())
 
-# API key status (used in header badge)
-try:
-    _cfg    = load_config(str(ROOT / "config" / "config.yaml"))
-    _apikey = _cfg["api"].get("openweather_api_key", "")
-    IS_LIVE = bool(_apikey and _apikey != "YOUR_OPENWEATHER_API_KEY")
-except Exception:
-    IS_LIVE = False
+# Derive live status from the initialisation result
+IS_LIVE    = _APP_STATUS["api_key_ok"] and _APP_STATUS["db_ok"]
+IS_DB_PG   = _APP_STATUS["db_type"] == "postgres"
+_INIT_ERR  = _APP_STATUS["error"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
@@ -375,6 +405,7 @@ with st.sidebar:
         "⚠️ Health & Safety",
         "🗺️ Map View",
         "🔬 Anomaly Detection",
+        "🔧 Connection Debug",
     ], label_visibility="collapsed")
 
     st.divider()
@@ -430,15 +461,41 @@ with st.sidebar:
     st.divider()
 
     # ── Status & controls ─────────────────────────────────────────────────────
-    if IS_LIVE:
-        st.success("🔄 Live collection is **ON**", icon=None)
-    else:
-        st.caption("⚠️ Demo mode — add your OpenWeather API key in `config/config.yaml` to enable live data collection.")
+    # ── Connection diagnostics panel ────────────────────────────────────────
+    st.markdown("**🔌 System Status**")
 
-    st.caption(f"Data: {len(df_all):,} records · {len(all_cities_in_data)} cities")
+    # Database status
+    if _APP_STATUS["db_ok"]:
+        if IS_DB_PG:
+            st.success("✅ Supabase connected")
+        else:
+            st.warning("⚠️ SQLite (local only)")
+    else:
+        st.error("❌ Database not connected")
+        if _INIT_ERR:
+            with st.expander("Show error"):
+                st.code(_INIT_ERR, language=None)
+
+    # API key status
+    if _APP_STATUS["api_key_ok"]:
+        st.success("✅ API key loaded")
+    else:
+        st.error("❌ API key missing")
+
+    # Scheduler status
+    if _APP_STATUS["scheduler_ok"]:
+        st.success("✅ Collector running")
+    else:
+        if _APP_STATUS["api_key_ok"]:
+            st.warning("⚠️ Collector not started")
+        else:
+            st.caption("Collector needs API key")
+
+    st.divider()
+    st.caption(f"Records: **{len(df_all):,}** · Cities: **{len(all_cities_in_data)}**")
     st.caption(f"Refreshed: {datetime.now():%H:%M:%S}")
 
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -1112,3 +1169,123 @@ elif page == "🔬 Anomaly Detection":
         fig_sc.update_traces(opacity=0.7)
         fig_sc.update_layout(**_PL)
         st.plotly_chart(fig_sc, use_container_width=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGE 7 — CONNECTION DEBUG
+# ═════════════════════════════════════════════════════════════════════════════
+elif page == "🔧 Connection Debug":
+
+    brand_header("Connection Debug", "Diagnose Supabase & API connectivity", IS_LIVE)
+
+    st.markdown("Use this page to verify that Streamlit secrets are loaded correctly "
+                "and that Supabase is connected. Remove this page before sharing publicly.")
+
+    # ── Secrets check ─────────────────────────────────────────────────────────
+    section("1. Streamlit Secrets")
+    try:
+        secrets_keys = list(st.secrets.keys()) if hasattr(st, "secrets") else []
+        if secrets_keys:
+            st.success(f"✅ Secrets file loaded. Top-level keys: **{secrets_keys}**")
+        else:
+            st.error("❌ No secrets found. Go to Streamlit Cloud → Settings → Secrets and add them.")
+
+        # Check [api] section
+        if "api" in st.secrets:
+            key = st.secrets["api"].get("openweather_api_key", "")
+            if key and key != "YOUR_OPENWEATHER_API_KEY":
+                st.success(f"✅ [api] openweather_api_key loaded — starts with `{key[:6]}...`")
+            else:
+                st.error("❌ [api] openweather_api_key is missing or still set to placeholder")
+        else:
+            st.error("❌ [api] section not found in secrets")
+
+        # Check [database] section
+        if "database" in st.secrets:
+            db_url = st.secrets["database"].get("url", "")
+            if db_url and db_url.startswith("postgres"):
+                masked = db_url[:30] + "..." + db_url[-20:]
+                st.success(f"✅ [database] url loaded — `{masked}`")
+            else:
+                st.error("❌ [database] url is missing or does not start with 'postgres'")
+        else:
+            st.error("❌ [database] section not found in secrets")
+
+    except Exception as e:
+        st.error(f"Error reading secrets: {e}")
+
+    # ── Database connection test ───────────────────────────────────────────────
+    section("2. Database Connection")
+    from src.db import test_connection, is_postgres, init_db
+
+    col1, col2 = st.columns(2)
+    with col1:
+        db_mode = "PostgreSQL / Supabase" if is_postgres() else "SQLite (local)"
+        st.info(f"Mode detected: **{db_mode}**")
+
+    with col2:
+        if st.button("🔌 Test Connection Now", type="primary"):
+            with st.spinner("Connecting…"):
+                ok, msg = test_connection()
+            if ok:
+                st.success(f"✅ {msg}")
+            else:
+                st.error(f"❌ {msg}")
+                st.markdown("""
+                **Common fixes:**
+                - Make sure `sslmode=require` is in the URL (the code adds it automatically)
+                - Check the password has no special characters like `@` or `#`
+                - Try resetting the DB password in Supabase → Settings → Database → Reset password
+                - Make sure the URL format is: `postgresql://postgres:PASSWORD@db.XXXX.supabase.co:5432/postgres`
+                """)
+
+    # Create table manually button
+    if st.button("🗄️ Create Table in Supabase Now"):
+        with st.spinner("Creating table…"):
+            try:
+                init_db()
+                st.success("✅ Table created (or already exists). Refresh Supabase Table Editor.")
+            except Exception as e:
+                st.error(f"❌ Failed: {e}")
+
+    # ── API test ──────────────────────────────────────────────────────────────
+    section("3. OpenWeather API Test")
+    if st.button("🌤️ Test API Key (fetch Delhi data)"):
+        try:
+            cfg_test = load_config(str(ROOT / "config" / "config.yaml"))
+            api_key  = cfg_test["api"].get("openweather_api_key", "")
+            if not api_key or api_key == "YOUR_OPENWEATHER_API_KEY":
+                st.error("❌ API key not loaded. Check [api] section in secrets.")
+            else:
+                import requests
+                # Test geocoding for Delhi
+                geo_url = "http://api.openweathermap.org/geo/1.0/direct"
+                r = requests.get(geo_url, params={"q": "Delhi,IN", "limit": 1,
+                                                   "appid": api_key}, timeout=8)
+                if r.status_code == 200 and r.json():
+                    lat = r.json()[0]["lat"]
+                    lon = r.json()[0]["lon"]
+                    st.success(f"✅ API key works! Delhi coordinates: lat={lat}, lon={lon}")
+                elif r.status_code == 401:
+                    st.error("❌ API key rejected (401). The key may be invalid or not activated yet.")
+                    st.caption("New keys take up to 2 hours to activate after signing up.")
+                else:
+                    st.error(f"❌ Unexpected response: {r.status_code} — {r.text[:200]}")
+        except Exception as e:
+            st.error(f"❌ API test failed: {e}")
+
+    # ── Full status summary ────────────────────────────────────────────────────
+    section("4. App Initialisation Status")
+    st.json(_APP_STATUS)
+    st.caption("scheduler_ok=True means data is being collected every 30 min automatically.")
+
+    # ── What your secrets.toml should look like ───────────────────────────────
+    section("5. Expected Secrets Format")
+    st.code("""
+[api]
+openweather_api_key = "your_32_character_key_here"
+
+[database]
+url = "postgresql://postgres:YourPassword@db.abcdefgh.supabase.co:5432/postgres"
+    """, language="toml")
+    st.caption("Paste this exactly in Streamlit Cloud → Settings → Secrets (with your real values).")

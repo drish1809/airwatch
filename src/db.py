@@ -2,11 +2,13 @@
 src/db.py — Database Abstraction Layer
 ========================================
 Automatically uses:
-  - PostgreSQL (Supabase) when DATABASE_URL is in Streamlit secrets or env
-  - SQLite                when running locally without a cloud DB
+  • PostgreSQL / Supabase  when DATABASE_URL is in Streamlit secrets or env var
+  • SQLite                 when running locally without a cloud DB
 
-This means the same code works locally AND on Streamlit Cloud
-with zero changes between environments.
+Key fixes:
+  • SSL enabled for Supabase (required by default)
+  • Detailed error messages instead of silent failures
+  • init_db() called on startup so the table always exists
 """
 
 from __future__ import annotations
@@ -22,9 +24,8 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Schemas
+# SQL schemas
 # ─────────────────────────────────────────────────────────────────────────────
-
 _CREATE_SQLITE = """
 CREATE TABLE IF NOT EXISTS air_quality (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,40 +75,65 @@ VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
 ON CONFLICT (timestamp,city) DO NOTHING
 """
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Connection helpers
+# URL resolution
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_pg_url() -> Optional[str]:
     """
-    Return Postgres connection URL from:
-    1. Streamlit secrets  →  [database] url
-    2. Environment var    →  DATABASE_URL
-    3. None               →  fall back to SQLite
+    Returns the PostgreSQL connection URL from (in priority order):
+      1. Streamlit secrets  →  st.secrets["database"]["url"]
+      2. Environment var    →  DATABASE_URL
+      3. None               →  use SQLite locally
     """
-    # Try Streamlit secrets (works on Streamlit Cloud)
+    # Streamlit secrets (works on Streamlit Cloud)
     try:
         import streamlit as st
         if hasattr(st, "secrets") and "database" in st.secrets:
             url = st.secrets["database"].get("url", "")
-            if url:
+            if url and url.startswith("postgres"):
                 return url
     except Exception:
         pass
 
-    # Try environment variable (works on Render / Railway / etc.)
-    return os.environ.get("DATABASE_URL") or None
+    # Environment variable (Render, Railway, Docker)
+    env = os.environ.get("DATABASE_URL", "")
+    if env and env.startswith("postgres"):
+        return env
+
+    return None
 
 
 def is_postgres() -> bool:
+    """True when a PostgreSQL URL is available."""
     return _get_pg_url() is not None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Connection factory
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _pg_connect():
-    """Open a psycopg2 connection to Supabase / Postgres."""
+    """
+    Open a psycopg2 connection to Supabase.
+    Supabase requires SSL — we enforce it here.
+    """
     import psycopg2
-    return psycopg2.connect(_get_pg_url())
+    url = _get_pg_url()
+
+    # Add sslmode=require if not already present (Supabase needs it)
+    if "sslmode" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}sslmode=require"
+
+    try:
+        return psycopg2.connect(url)
+    except psycopg2.OperationalError as e:
+        raise ConnectionError(
+            f"Could not connect to Supabase.\n"
+            f"Check your DATABASE_URL in Streamlit secrets.\n"
+            f"Original error: {e}"
+        ) from e
 
 
 def _sqlite_path() -> Path:
@@ -121,54 +147,56 @@ def _sqlite_path() -> Path:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init_db() -> None:
-    """Create the air_quality table if it does not already exist."""
+    """
+    Create the air_quality table if it does not already exist.
+    Called once on app startup via _init_app().
+    """
     if is_postgres():
         conn = _pg_connect()
         try:
-            with conn:
-                conn.cursor().execute(_CREATE_PG)
-            logger.info("PostgreSQL table ready.")
+            cur = conn.cursor()
+            cur.execute(_CREATE_PG)
+            conn.commit()
+            logger.info("✅ Supabase table ready.")
         finally:
             conn.close()
     else:
         with sqlite3.connect(str(_sqlite_path())) as conn:
             conn.execute(_CREATE_SQLITE)
-        logger.info("SQLite table ready: %s", _sqlite_path())
+        logger.info("✅ SQLite table ready: %s", _sqlite_path())
 
 
 def save_record(rec: dict) -> None:
     """
-    Insert one air-quality record. Silently skips duplicates.
-    rec keys: timestamp, city, country, latitude, longitude,
-              aqi, co, no, no2, o3, so2, pm2_5, pm10, nh3,
-              temperature, humidity, wind_speed
+    Insert one air-quality reading. Silently skips duplicates.
     """
-    values = (
+    vals = (
         str(rec["timestamp"]),
-        rec["city"], rec["country"],
+        rec["city"],    rec["country"],
         rec["latitude"], rec["longitude"],
-        rec["aqi"],   rec["co"],   rec["no"],
-        rec["no2"],   rec["o3"],   rec["so2"],
-        rec["pm2_5"], rec["pm10"], rec["nh3"],
+        rec["aqi"],  rec["co"],   rec["no"],
+        rec["no2"],  rec["o3"],   rec["so2"],
+        rec["pm2_5"],rec["pm10"], rec["nh3"],
         rec["temperature"], rec["humidity"], rec["wind_speed"],
     )
 
     if is_postgres():
         conn = _pg_connect()
         try:
-            with conn:
-                conn.cursor().execute(_INSERT_PG, values)
+            cur = conn.cursor()
+            cur.execute(_INSERT_PG, vals)
+            conn.commit()
         finally:
             conn.close()
     else:
         with sqlite3.connect(str(_sqlite_path())) as conn:
-            conn.execute(_INSERT_SQLITE, values)
+            conn.execute(_INSERT_SQLITE, vals)
 
 
 def load_dataframe() -> pd.DataFrame:
     """
-    Return the full air_quality table as a pandas DataFrame.
-    Returns an empty DataFrame if the table is empty or doesn't exist yet.
+    Return the full air_quality table as a DataFrame.
+    Returns an empty DataFrame on any error (caller handles fallback).
     """
     try:
         if is_postgres():
@@ -190,7 +218,8 @@ def load_dataframe() -> pd.DataFrame:
                     conn,
                 )
 
-        logger.debug("Loaded %d records from DB.", len(df))
+        logger.info("Loaded %d records from %s.", len(df),
+                    "Supabase" if is_postgres() else "SQLite")
         return df
 
     except Exception as exc:
@@ -199,7 +228,7 @@ def load_dataframe() -> pd.DataFrame:
 
 
 def record_count() -> int:
-    """Return total number of records in the table."""
+    """Return total number of rows in the table."""
     try:
         if is_postgres():
             conn = _pg_connect()
@@ -214,6 +243,28 @@ def record_count() -> int:
             if not db.exists():
                 return 0
             with sqlite3.connect(str(db)) as conn:
-                return conn.execute("SELECT COUNT(*) FROM air_quality").fetchone()[0]
+                return conn.execute(
+                    "SELECT COUNT(*) FROM air_quality"
+                ).fetchone()[0]
     except Exception:
         return 0
+
+
+def test_connection() -> tuple[bool, str]:
+    """
+    Test the database connection and return (success, message).
+    Used by the diagnostics panel in the sidebar.
+    """
+    try:
+        if is_postgres():
+            conn = _pg_connect()
+            cur  = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM air_quality")
+            n = cur.fetchone()[0]
+            conn.close()
+            return True, f"Supabase connected — {n:,} records"
+        else:
+            n = record_count()
+            return True, f"SQLite connected — {n:,} records"
+    except Exception as exc:
+        return False, str(exc)
