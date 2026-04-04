@@ -1,1 +1,24 @@
-config/config.yaml 
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+
+# ── Secrets (NEVER commit these) ────────────────────────────────────────────
+.streamlit/secrets.toml
+*.env
+.env
+.env.*
+config/local.yaml
+
+# ── Data & models (too large / regenerated) ─────────────────────────────────
+data/air_quality.db
+logs/
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
