@@ -273,7 +273,7 @@ def load_data() -> pd.DataFrame:
         csv = ROOT / "data" / "raw" / "air_quality_data.csv"
         if csv.exists():
             df = pd.read_csv(csv)
-            st.caption("ℹ️ Showing demo data. Connect a database for live data.")
+
         else:
             st.error("⛔ No data found. Run `python run.py --demo` to generate demo data.")
             st.stop()
@@ -408,7 +408,6 @@ with st.sidebar:
         "⚠️ Health & Safety",
         "🗺️ Map View",
         "🔬 Anomaly Detection",
-        "🔧 Connection Debug",
     ], label_visibility="collapsed")
 
     st.divider()
@@ -464,39 +463,13 @@ with st.sidebar:
     st.divider()
 
     # ── Status & controls ─────────────────────────────────────────────────────
-    # ── Connection diagnostics panel ────────────────────────────────────────
-    st.markdown("**🔌 System Status**")
-
-    # Database status
-    if _APP_STATUS["db_ok"]:
-        if IS_DB_PG:
-            st.success("✅ Supabase connected")
-        else:
-            st.warning("⚠️ SQLite (local only)")
+    # ── Simple status dot ────────────────────────────────────────────────────
+    if IS_LIVE:
+        st.success("🔄 Live data collection is ON")
     else:
-        st.error("❌ Database not connected")
-        if _INIT_ERR:
-            with st.expander("Show error"):
-                st.code(_INIT_ERR, language=None)
+        st.warning("Demo mode — add API key for live data")
 
-    # API key status
-    if _APP_STATUS["api_key_ok"]:
-        st.success("✅ API key loaded")
-    else:
-        st.error("❌ API key missing")
-
-    # Scheduler status
-    if _APP_STATUS["scheduler_ok"]:
-        st.success("✅ Collector running")
-    else:
-        if _APP_STATUS["api_key_ok"]:
-            st.warning("⚠️ Collector not started")
-        else:
-            st.caption("Collector needs API key")
-
-    st.divider()
-    st.caption(f"Records: **{len(df_all):,}** · Cities: **{len(all_cities_in_data)}**")
-    st.caption(f"Refreshed: {datetime.now():%H:%M:%S}")
+    st.caption(f"Updated: {datetime.now():%H:%M:%S}")
 
     if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
@@ -730,10 +703,14 @@ elif page == "🔮 AQI Prediction":
             st.selectbox("State / UT", ["—"], disabled=True, key="pred_state_dis")
     with pc3:
         if pred_country == "India" and pred_state != "Any State":
-            city_choices = get_india_cities_for_state(pred_state)
+            _city_pool = get_india_cities_for_state(pred_state)
         else:
-            city_choices = get_cities_for_country(pred_country)
-        pred_city = st.selectbox("City", city_choices or ["—"], key="pred_city_sel")
+            _city_pool = get_cities_for_country(pred_country)
+        # Only show cities that actually have collected data
+        city_choices = [c for c in _city_pool if c in all_cities_in_data]
+        if not city_choices:
+            city_choices = all_cities_in_data
+        pred_city = st.selectbox("City", city_choices, key="pred_city_sel")
 
     # ── Step 2: Date & hour ───────────────────────────────────────────────────
     st.markdown('<div class="info-pill">STEP 2 — Select Date & Hour</div>', unsafe_allow_html=True)
@@ -751,12 +728,7 @@ elif page == "🔮 AQI Prediction":
     st.markdown('<div class="info-pill">STEP 3 — Pollutant Inputs</div>', unsafe_allow_html=True)
 
     if has_live:
-        st.caption(
-            f"✅ Live data available for **{pred_city}** — values pre-filled from latest reading. "
-            "Toggle below to enter custom values."
-        )
-    else:
-        st.caption(f"ℹ️ No collected data for **{pred_city}**. Enter values manually.")
+        st.caption(f"Values auto-filled from the latest reading for **{pred_city}**.")
 
     manual_override = st.checkbox(
         "Enter values manually",
@@ -783,8 +755,7 @@ elif page == "🔮 AQI Prediction":
     with pp4: temp  = st.number_input("Temperature (°C)", -20.0, 55.0, float(round(v_temp, 1)),  step=0.5, disabled=disabled_inputs)
     with pp5: humid = st.number_input("Humidity (%)",    0.0, 100.0, float(round(v_humid, 1)), step=1.0, disabled=disabled_inputs)
 
-    if disabled_inputs:
-        st.caption(f"Using values from latest {pred_city} reading. Enable manual entry above to override.")
+
 
     # ── Predict button ────────────────────────────────────────────────────────
     st.markdown("")
@@ -879,9 +850,7 @@ elif page == "🔮 AQI Prediction":
           </ul>
         </div>""", unsafe_allow_html=True)
 
-        if predictor.is_ready:
-            m = predictor.metrics
-            st.caption(f"Model: **{predictor.model_name}** · RMSE {m.get('rmse','?')} · R² {m.get('r2','?')}")
+
 
     # ── 24-hour forecast ──────────────────────────────────────────────────────
     section("24-Hour Forecast")
@@ -947,14 +916,8 @@ elif page == "⚠️ Health & Safety":
 
         # Strict intersection — only cities that exist in the dataset
         hs_avail = [c for c in hs_pool if c in all_cities_in_data]
-
         if not hs_avail:
-            st.selectbox("City", ["No data available"], disabled=True, key="hs_city_dis")
-            st.warning(
-                f"No collected data for cities in this region. "
-                "Try a different country/state, or run `python run.py --demo` to seed data."
-            )
-            st.stop()
+            hs_avail = all_cities_in_data  # show all available if region has none
 
         hs_city = st.selectbox("City", hs_avail, key="hs_city_sel")
 
@@ -1279,8 +1242,7 @@ elif page == "🔧 Connection Debug":
 
     # ── Full status summary ────────────────────────────────────────────────────
     section("4. App Initialisation Status")
-    st.json(_APP_STATUS)
-    st.caption("scheduler_ok=True means data is being collected every 30 min automatically.")
+    # (internal status hidden from users)
 
     # ── What your secrets.toml should look like ───────────────────────────────
     section("5. Expected Secrets Format")
