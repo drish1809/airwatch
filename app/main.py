@@ -854,15 +854,27 @@ elif page == "⚠️ Health & Safety":
     sec(f"Recent Trend — {hs_city}")
     recent = city_df[city_df["timestamp"] >= cutoff]
     if not recent.empty:
-        fig_ct = px.area(
-            recent, x="timestamp", y="aqi",
-            color_discrete_sequence=[info["color"]],
-            labels={"aqi": "AQI", "timestamp": ""},
+        fig_ct = go.Figure()
+        fig_ct.add_trace(go.Scatter(
+            x=recent["timestamp"],
+            y=recent["aqi"],
+            mode="lines",
+            fill="tozeroy",
+            line=dict(color=info["color"], width=2),
+            fillcolor="rgba(88,166,255,0.08)",
+            hovertemplate="%{x|%b %d %H:%M}<br>AQI: %{y:.0f}<extra></extra>",
+        ))
+        fig_ct.add_hline(
+            y=100, line_dash="dot",
+            line_color="#FFFF00", opacity=0.5,
+            annotation_text="Moderate",
         )
-        fig_ct.update_traces(fill="tozeroy",fillcolor=f"{info['color']}20",line=dict(color=info["color"]))
-        fig_ct.add_hline(y=100, line_dash="dot", line_color="#FFFF00", opacity=0.5)
-        fig_ct.add_hline(y=150, line_dash="dot", line_color="#FF7E00", opacity=0.5)
-        fig_ct.update_layout(**_PL)
+        fig_ct.add_hline(
+            y=150, line_dash="dot",
+            line_color="#FF7E00", opacity=0.5,
+            annotation_text="Sensitive",
+        )
+        fig_ct.update_layout(xaxis_title="", yaxis_title="AQI", **_PL)
         st.plotly_chart(fig_ct, use_container_width=True)
 
     # ── Vulnerable groups ─────────────────────────────────────────────────────
