@@ -859,9 +859,7 @@ elif page == "⚠️ Health & Safety":
             color_discrete_sequence=[info["color"]],
             labels={"aqi": "AQI", "timestamp": ""},
         )
-        fig_ct.update_traces(fill="tozeroy",
-                             fillcolor=f"{info['color']}20",
-                             line_color=info["color"])
+        fig_ct.update_traces(fill="tozeroy",fillcolor=f"{info['color']}20",line=dict(color=info["color"]))
         fig_ct.add_hline(y=100, line_dash="dot", line_color="#FFFF00", opacity=0.5)
         fig_ct.add_hline(y=150, line_dash="dot", line_color="#FF7E00", opacity=0.5)
         fig_ct.update_layout(**_PL)
